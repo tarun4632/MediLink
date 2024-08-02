@@ -15,9 +15,9 @@ Healthcare in rural areas faces significant challenges due to limited access to 
 
 1. Clone the repository:
    
-   `git clone https://github.com/yourusername/medical-chatbot.git`
+   `git clone https://github.com/tarun4632/MediLink.git`
    
-   `cd medical-chatbot`
+   `cd MediLink`
    
 3. Create and activate a virtual environment:
    
