@@ -8,7 +8,7 @@ genai.configure(api_key='AIzaSyDbzRk3JZmZUC2bu0BuQxj-2zd889Zbxjo')
 model = genai.GenerativeModel('gemini-1.5-pro-latest')
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app)  # Enable CORS for all routes 
 
 # MediLink prompt
 MEDILINK_PROMPT = """You are MediLink, an experienced medical doctor. Your task is to provide a preliminary assessment based on the patient's information and symptoms. 
