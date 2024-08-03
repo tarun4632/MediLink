@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { useNavigate } from 'react-router-dom';
+import { redirect, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import ReactMarkdown from 'react-markdown';
+
 
 const FormPage = () => {
   const [formData, setFormData] = useState({
@@ -132,6 +133,7 @@ const FormPage = () => {
               />
             </div>
             <button
+              
               className="w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded mt-4 hover:bg-blue-700 transition duration-300"
               type="submit"
             >
@@ -139,11 +141,20 @@ const FormPage = () => {
             </button>
           </form>
           {report && (
+            <div>
             <div className="mt-8 p-4 bg-green-100 rounded">
               <h3 className="text-xl font-bold mb-2">Diagnosis Report</h3>
               <div className="prose max-w-none">
                 <ReactMarkdown>{report}</ReactMarkdown>
               </div>
+              
+            </div>
+            <a
+         href='https://medilink-9j8o.onrender.com/'
+             className='w-full cursor-pointer bg-blue-600 text-white font-semibold py-2 px-4 rounded mt-4 hover:bg-blue-700 transition duration-300 text-center'>
+                Not Satisfied, talk to our AI Doctor
+              </a>
+
             </div>
           )}
         </div>
