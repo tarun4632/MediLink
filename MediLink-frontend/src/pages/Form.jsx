@@ -46,7 +46,33 @@ const LOADING_MESSAGES = {
   default: 'Processing consultation...',
 };
 
+const parseMaybeJson = (value) => {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return value;
+};
+
+const normalizeConsultationPayload = (data) => ({
+  session_id: data.session_id || '',
+  intake_assessment: parseMaybeJson(data.intake_assessment),
+  report_analysis: parseMaybeJson(data.report_analysis),
+  final_assessment: parseMaybeJson(data.final_assessment) || parseMaybeJson(data.assessment),
+  emergency: Boolean(data.emergency),
+  matched_keywords: data.matched_keywords || [],
+  has_reports: Boolean(data.has_reports),
+  disclaimer: data.disclaimer || '',
+  messages: data.messages || data.chat_messages || [],
+  active: data.active !== false,
+});
+
 const applyConsultationData = (data, setters) => {
+  const normalized = normalizeConsultationPayload(data);
   const {
     setSessionId,
     setIntakeAssessment,
@@ -61,17 +87,19 @@ const applyConsultationData = (data, setters) => {
     setSubmitted,
   } = setters;
 
-  setSessionId(data.session_id);
-  setIntakeAssessment(data.intake_assessment);
-  setReportAnalysis(data.report_analysis);
-  setFinalAssessment(data.final_assessment);
-  setEmergency(data.emergency || data.final_assessment?.severity === 'emergency');
-  setMatchedKeywords(data.matched_keywords || []);
-  setHasReports(data.has_reports);
-  setDisclaimer(data.disclaimer || '');
-  setChatMessages(data.messages || data.chat_messages || []);
-  setChatReadOnly(data.active === false);
-  setSubmitted(Boolean(data.final_assessment));
+  setSessionId(normalized.session_id);
+  setIntakeAssessment(normalized.intake_assessment);
+  setReportAnalysis(normalized.report_analysis);
+  setFinalAssessment(normalized.final_assessment);
+  setEmergency(normalized.emergency || normalized.final_assessment?.severity === 'emergency');
+  setMatchedKeywords(normalized.matched_keywords);
+  setHasReports(normalized.has_reports);
+  setDisclaimer(normalized.disclaimer);
+  setChatMessages(normalized.messages);
+  setChatReadOnly(normalized.active === false);
+  setSubmitted(Boolean(normalized.final_assessment));
+
+  return normalized;
 };
 
 const FormPage = () => {
@@ -89,8 +117,10 @@ const FormPage = () => {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatReadOnly, setChatReadOnly] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [panelLoading, setPanelLoading] = useState(false);
   const [loadingStage, setLoadingStage] = useState('default');
   const [error, setError] = useState('');
+  const [panelError, setPanelError] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [historyKey, setHistoryKey] = useState(0);
 
@@ -122,6 +152,7 @@ const FormPage = () => {
     setChatMessages([]);
     setChatReadOnly(false);
     setError('');
+    setPanelError('');
     setSubmitted(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
@@ -150,6 +181,7 @@ const FormPage = () => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setPanelError('');
     setSubmitted(false);
     setSessionId('');
     setIntakeAssessment(null);
@@ -182,10 +214,19 @@ const FormPage = () => {
           },
         });
       }
-      applyConsultationData(response.data, consultationSetters);
+      const normalized = applyConsultationData(response.data, consultationSetters);
+      if (!normalized.final_assessment) {
+        const message = 'Assessment completed but no results were returned. Try clicking View on the history entry.';
+        setError(message);
+        setPanelError(message);
+      }
       setHistoryKey((k) => k + 1);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to generate assessment. Please try again.');
+      const message = err.response?.data?.error
+        || err.message
+        || 'Failed to generate assessment. Please try again.';
+      setError(message);
+      setPanelError(message);
     } finally {
       setLoading(false);
       setLoadingStage('default');
@@ -193,26 +234,51 @@ const FormPage = () => {
   };
 
   const viewConsultation = async (viewSessionId) => {
-    setLoading(true);
+    setPanelLoading(true);
+    setPanelError('');
     setError('');
     try {
       const response = await api.get(`/history/${viewSessionId}`);
-      applyConsultationData(response.data, consultationSetters);
+      const normalized = applyConsultationData(response.data, consultationSetters);
+      if (!normalized.final_assessment) {
+        setPanelError('This consultation has no saved assessment results.');
+        return;
+      }
+      if (response.data.patient_data) {
+        setFormData({
+          name: response.data.patient_data.name || '',
+          gender: response.data.patient_data.gender || '',
+          age: response.data.patient_data.age || '',
+          height: response.data.patient_data.height || '',
+          weight: response.data.patient_data.weight || '',
+          bp: response.data.patient_data.bp || '',
+          symptom_duration: response.data.patient_data.symptom_duration || '',
+          allergies: response.data.patient_data.allergies || '',
+          current_medications: response.data.patient_data.current_medications || '',
+          existing_conditions: response.data.patient_data.existing_conditions || '',
+          symptoms: response.data.patient_data.symptoms || '',
+        });
+      }
     } catch (err) {
-      setError(err.response?.data?.error || 'Could not load this consultation.');
+      const message = err.response?.data?.error || 'Could not load this consultation.';
+      setError(message);
+      setPanelError(message);
     } finally {
-      setLoading(false);
+      setPanelLoading(false);
     }
   };
 
   const resumeConsultation = async (resumeSessionId) => {
-    setLoading(true);
+    setPanelLoading(true);
+    setPanelError('');
     setError('');
     try {
       const response = await api.get(`/history/${resumeSessionId}`);
       const data = response.data;
       if (!data.active) {
-        setError('This consultation has expired. View it in history or start a new one.');
+        const message = 'This consultation has expired. View it in history or start a new one.';
+        setError(message);
+        setPanelError(message);
         return;
       }
       setFormData({
@@ -228,13 +294,19 @@ const FormPage = () => {
         existing_conditions: data.patient_data?.existing_conditions || '',
         symptoms: data.patient_data?.symptoms || '',
       });
-      applyConsultationData(data, consultationSetters);
+      const normalized = applyConsultationData(data, consultationSetters);
+      if (!normalized.final_assessment) {
+        setPanelError('This consultation has no saved assessment results.');
+        return;
+      }
       setChatReadOnly(false);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
-      setError(err.response?.data?.error || 'Could not resume this consultation.');
+      const message = err.response?.data?.error || 'Could not resume this consultation.';
+      setError(message);
+      setPanelError(message);
     } finally {
-      setLoading(false);
+      setPanelLoading(false);
     }
   };
 
@@ -389,8 +461,10 @@ const FormPage = () => {
 
           <aside className="lg:col-span-4 order-2 lg:order-3 lg:sticky lg:top-24">
             <OutputPanel
-              loading={loading}
+              key={sessionId || 'empty'}
+              loading={loading || panelLoading}
               loadingStage={loadingStage}
+              error={panelError}
               intakeAssessment={intakeAssessment}
               reportAnalysis={reportAnalysis}
               finalAssessment={finalAssessment}

@@ -1,13 +1,21 @@
 import json
 import os
+import re
 
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, ValidationError
 
-from prompts import MEDILINK_SYSTEM_INSTRUCTION
-from schemas import AssessmentResult
+from prompts import (
+    MEDILINK_SYSTEM_INSTRUCTION,
+    REPORT_AGENT_INSTRUCTION,
+    SYNTHESIS_AGENT_INSTRUCTION,
+    build_report_context,
+    build_synthesis_context,
+)
+from schemas import AssessmentResult, FinalAssessment, ReportAnalysis
 
-MODEL_NAME = os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash')
+MODEL_NAME = os.environ.get('GEMINI_MODEL', 'gemini-3.1-flash-lite')
 TEMPERATURE = float(os.environ.get('GEMINI_TEMPERATURE', '0.3'))
 
 _client = None
@@ -23,13 +31,13 @@ def get_client() -> genai.Client:
     return _client
 
 
-def _assessment_config() -> types.GenerateContentConfig:
+def _json_config(system_instruction: str, schema: dict, max_tokens: int = 2048) -> types.GenerateContentConfig:
     return types.GenerateContentConfig(
-        system_instruction=MEDILINK_SYSTEM_INSTRUCTION,
+        system_instruction=system_instruction,
         temperature=TEMPERATURE,
-        max_output_tokens=2048,
+        max_output_tokens=max_tokens,
         response_mime_type='application/json',
-        response_json_schema=AssessmentResult.model_json_schema(),
+        response_json_schema=schema,
     )
 
 
@@ -50,18 +58,77 @@ def _extract_text(response) -> str:
     return text
 
 
+def _loads_json(raw: str) -> dict:
+    text = raw.strip()
+    if text.startswith('```'):
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+    return json.loads(text)
+
+
+def _generate_json(
+    system_instruction: str,
+    prompt: str,
+    schema: dict,
+    *,
+    max_tokens: int = 2048,
+    model_class: type[BaseModel] | None = None,
+) -> dict:
+    last_error: Exception | None = None
+    for attempt in range(2):
+        token_budget = max_tokens if attempt == 0 else max(max_tokens * 2, 4096)
+        try:
+            response = get_client().models.generate_content(
+                model=MODEL_NAME,
+                contents=prompt,
+                config=_json_config(system_instruction, schema, max_tokens=token_budget),
+            )
+            payload = _loads_json(_extract_text(response))
+            if model_class is not None:
+                return model_class.model_validate(payload).model_dump()
+            return payload
+        except (json.JSONDecodeError, ValueError, ValidationError) as exc:
+            last_error = exc
+    raise ValueError(f'Failed to parse model JSON response: {last_error}')
+
+
 def generate_assessment(prompt: str) -> dict:
-    response = get_client().models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt,
-        config=_assessment_config(),
+    return _generate_json(
+        MEDILINK_SYSTEM_INSTRUCTION,
+        prompt,
+        AssessmentResult.model_json_schema(),
+        model_class=AssessmentResult,
     )
-    return json.loads(_extract_text(response))
+
+
+def generate_report_analysis(
+    intake_assessment: dict,
+    new_reports: list[dict],
+    past_reports: list[dict],
+) -> dict:
+    prompt = build_report_context(intake_assessment, new_reports, past_reports)
+    return _generate_json(
+        REPORT_AGENT_INSTRUCTION,
+        prompt,
+        ReportAnalysis.model_json_schema(),
+        max_tokens=3072,
+        model_class=ReportAnalysis,
+    )
+
+
+def generate_final_assessment(intake_assessment: dict, report_analysis: dict | None) -> dict:
+    prompt = build_synthesis_context(intake_assessment, report_analysis)
+    return _generate_json(
+        SYNTHESIS_AGENT_INSTRUCTION,
+        prompt,
+        FinalAssessment.model_json_schema(),
+        max_tokens=4096,
+        model_class=FinalAssessment,
+    )
 
 
 def generate_chat_reply(system_instruction: str, history: list[dict], message: str) -> str:
     contents = _build_chat_contents(history, message)
-
     response = get_client().models.generate_content(
         model=MODEL_NAME,
         contents=contents,
@@ -81,7 +148,6 @@ def _build_chat_contents(history: list[dict], message: str) -> list:
 
 def stream_chat_reply(system_instruction: str, history: list[dict], message: str):
     contents = _build_chat_contents(history, message)
-
     for chunk in get_client().models.generate_content_stream(
         model=MODEL_NAME,
         contents=contents,
