@@ -1,14 +1,29 @@
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import google.generativeai as genai
+from google import genai
 
-# Configure the Gemini AI
-genai.configure(api_key='AIzaSyDbzRk3JZmZUC2bu0BuQxj-2zd889Zbxjo')
+load_dotenv(Path(__file__).resolve().parent / '.env')
 
-model = genai.GenerativeModel('gemini-1.5-pro-latest')
+MODEL_NAME = os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash')
+
+_client = None
+
+
+def get_client():
+    global _client
+    if _client is None:
+        api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
+        if not api_key:
+            raise ValueError('Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable.')
+        _client = genai.Client(api_key=api_key)
+    return _client
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes 
+CORS(app)
 
 # MediLink prompt
 MEDILINK_PROMPT = """You are MediLink, an experienced medical doctor. Your task is to provide a preliminary assessment based on the patient's information and symptoms. 
@@ -41,7 +56,6 @@ Your response:"""
 def generate_report():
     data = request.json
 
-    # Calculate BMI
     height_m = float(data['height']) / 100
     weight_kg = float(data['weight'])
     bmi = weight_kg / (height_m ** 2)
@@ -56,11 +70,15 @@ def generate_report():
         symptoms=data['symptoms']
     )
 
-    # Generate response from Gemini AI
-    response = model.generate_content(prompt)
+    response = get_client().models.generate_content(
+        model=MODEL_NAME,
+        contents=prompt,
+    )
     report = response.text
 
     return jsonify(report=report)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('FLASK_PORT', 5000))
+    debug = os.environ.get('FLASK_DEBUG', 'true').lower() == 'true'
+    app.run(debug=debug, port=port)

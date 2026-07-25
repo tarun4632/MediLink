@@ -8,6 +8,7 @@ import ReactMarkdown from 'react-markdown';
 const FormPage = () => {
   const [formData, setFormData] = useState({
     name: '',
+    gender: '',
     age: '',
     height: '',
     weight: '',
@@ -29,7 +30,8 @@ const FormPage = () => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    axios.post('http://127.0.0.1:5000/generate_report', formData)
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
+    axios.post(`${apiUrl}/generate_report`, formData)
       .then(response => {
         setReport(response.data.report);
       })
@@ -61,6 +63,24 @@ const FormPage = () => {
                 onChange={handleChange}
                 placeholder="Enter your name"
               />
+            </div>
+            <div>
+              <label className="block text-gray-700 font-semibold mb-2" htmlFor="gender">
+                Gender
+              </label>
+              <select
+                className="w-full p-2 border border-gray-300 rounded"
+                id="gender"
+                name="gender"
+                value={formData.gender}
+                onChange={handleChange}
+                required
+              >
+                <option value="">Select gender</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
             </div>
             <div>
               <label className="block text-gray-700 font-semibold mb-2" htmlFor="age">

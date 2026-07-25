@@ -1,3 +1,4 @@
 chainlit
 langchain-core
 langchain-google-genai
+python-dotenv

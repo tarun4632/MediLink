@@ -1,14 +1,21 @@
+import os
+from pathlib import Path
+
 import streamlit as st
+from dotenv import load_dotenv
 from langchain_core.messages.system import SystemMessage
 from langchain_core.messages.human import HumanMessage
 from langchain_core.messages.ai import AIMessage
-
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import PromptTemplate
-import os
 
-# Set API Key
-os.environ["GOOGLE_API_KEY"] = "API-KEY" # Replace with your actual API key
+load_dotenv(Path(__file__).resolve().parent / '.env')
+
+if not os.environ.get('GOOGLE_API_KEY') and os.environ.get('GEMINI_API_KEY'):
+    os.environ['GOOGLE_API_KEY'] = os.environ['GEMINI_API_KEY']
+
+if not os.environ.get('GOOGLE_API_KEY'):
+    raise ValueError('Set GOOGLE_API_KEY or GEMINI_API_KEY in Prototypes/.env')
 
 # Define Generation Config
 generation_config = {
