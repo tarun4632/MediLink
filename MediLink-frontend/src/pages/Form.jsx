@@ -164,21 +164,24 @@ const FormPage = () => {
       setLoadingStage('intake');
     }
 
-    const payload = new FormData();
-    Object.entries(formData).forEach(([key, value]) => {
-      payload.append(key, value);
-    });
-    reportFiles.forEach((file) => {
-      payload.append('reports', file);
-    });
-
     try {
-      const response = await api.post('/assessment', payload, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        onUploadProgress: () => {
-          if (reportFiles.length > 0) setLoadingStage('ocr');
-        },
-      });
+      let response;
+      if (reportFiles.length === 0) {
+        response = await api.post('/assessment', formData);
+      } else {
+        const payload = new FormData();
+        Object.entries(formData).forEach(([key, value]) => {
+          payload.append(key, value);
+        });
+        reportFiles.forEach((file) => {
+          payload.append('reports', file);
+        });
+        response = await api.post('/assessment', payload, {
+          onUploadProgress: () => {
+            setLoadingStage('ocr');
+          },
+        });
+      }
       applyConsultationData(response.data, consultationSetters);
       setHistoryKey((k) => k + 1);
     } catch (err) {
