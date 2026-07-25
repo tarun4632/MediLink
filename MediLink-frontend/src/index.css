@@ -1,11 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400;1,700;1,900&family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap');
 
-
-.inter {
-    font-family: "Inter", sans-serif;
-    
-    
+@layer base {
+  html {
+    @apply scroll-smooth;
   }
+
+  body {
+    @apply bg-slate-50 text-slate-700 antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  .ml-page {
+    @apply min-h-screen bg-gradient-to-br from-slate-50 via-medilink-50 to-blue-100;
+  }
+
+  .ml-card {
+    @apply bg-white/90 backdrop-blur-sm rounded-2xl border border-white shadow-card;
+  }
+
+  .ml-input {
+    @apply w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-700
+      placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-medilink-200
+      focus:border-medilink-400 transition duration-200;
+  }
+
+  .ml-label {
+    @apply block text-sm font-medium text-slate-600 mb-1.5;
+  }
+
+  .ml-btn {
+    @apply inline-flex items-center justify-center px-5 py-2.5 rounded-xl font-semibold
+      transition duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2;
+  }
+
+  .ml-btn-primary {
+    @apply ml-btn bg-medilink-600 text-white hover:bg-medilink-700 focus:ring-medilink-300
+      disabled:opacity-50 disabled:cursor-not-allowed shadow-soft;
+  }
+
+  .ml-btn-secondary {
+    @apply ml-btn bg-white text-medilink-700 border border-medilink-200 hover:bg-medilink-50
+      focus:ring-medilink-200;
+  }
+
+  .ml-section-title {
+    @apply text-2xl font-bold text-slate-900 tracking-tight;
+  }
+
+  .ml-section-subtitle {
+    @apply text-slate-500 mt-1;
+  }
+}

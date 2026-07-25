@@ -1,82 +1,272 @@
+import json
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify
+from flask import Flask, Response, jsonify, request, stream_with_context
 from flask_cors import CORS
-from google import genai
+
+from gemini_client import generate_assessment, generate_chat_reply, stream_chat_reply
+from prompts import DISCLAIMER, build_chat_context, build_patient_context
+from sessions import append_message, create_session, get_consultation, get_session, list_user_history
+from triage import build_emergency_assessment, detect_emergency
 
 load_dotenv(Path(__file__).resolve().parent / '.env')
-
-MODEL_NAME = os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash')
-
-_client = None
-
-
-def get_client():
-    global _client
-    if _client is None:
-        api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
-        if not api_key:
-            raise ValueError('Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable.')
-        _client = genai.Client(api_key=api_key)
-    return _client
 
 app = Flask(__name__)
 CORS(app)
 
-# MediLink prompt
-MEDILINK_PROMPT = """You are MediLink, an experienced medical doctor. Your task is to provide a preliminary assessment based on the patient's information and symptoms. 
-Remember, this is not a definitive diagnosis, and you should always advise the patient to consult with a real doctor for proper medical advice.
-Don't give many possibilities, just give some likely ones and prescribe some general tests for that, basically make this a first consultation.
-If you diagnose something general, make another section with some general medicine prescription with names of medicines and their doses.
+REQUIRED_FIELDS = ['gender', 'age', 'height', 'weight', 'bp', 'symptoms']
 
-1. Always maintain a professional and empathetic tone.
-2. Provide general medical information based on current medical knowledge.
-3. Provide information on general health practices, disease prevention, and wellness.
-4. Be able to explain medical terms in simple language.
-5. Respect patient privacy and confidentiality.
 
-Patient Information:
-Gender: {gender}
-Age: {age}
-Height: {height} cm
-Weight: {weight} kg
-BMI: {bmi:.2f}
-Blood Pressure: {blood_pressure}
+def calculate_bmi(height_cm: float, weight_kg: float) -> float:
+    height_m = height_cm / 100
+    return weight_kg / (height_m ** 2)
 
-Symptoms: {symptoms}
 
-Please provide a preliminary assessment, potential causes, and general advice.
-Categorize the condition into mild, moderate, severe (one condition into one condition) and give proper advice, treatment, and prescription for mild and moderate conditions. But for severe conditions, ask the user to consult a doctor immediately.
-Analyze the question and see if it is related to healthcare or diagnosis or general greetings. If not, say that you are a medical bot MediLink and ask the user to ask related questions.
-Your response:"""
+def validate_patient_data(data: dict) -> str | None:
+    if not data:
+        return 'Request body is required.'
+    for field in REQUIRED_FIELDS:
+        if not str(data.get(field, '')).strip():
+            return f'Missing required field: {field}'
+    try:
+        age = float(data['age'])
+        height = float(data['height'])
+        weight = float(data['weight'])
+        if age <= 0 or height <= 0 or weight <= 0:
+            return 'Age, height, and weight must be positive numbers.'
+    except (TypeError, ValueError):
+        return 'Age, height, and weight must be valid numbers.'
+    return None
+
+
+def build_patient_payload(data: dict) -> dict:
+    return {
+        'name': data.get('name', '').strip(),
+        'gender': data.get('gender', '').strip(),
+        'age': data['age'],
+        'height': data['height'],
+        'weight': data['weight'],
+        'bp': data.get('bp', '').strip(),
+        'symptoms': data.get('symptoms', '').strip(),
+        'symptom_duration': data.get('symptom_duration', '').strip(),
+        'allergies': data.get('allergies', '').strip(),
+        'current_medications': data.get('current_medications', '').strip(),
+        'existing_conditions': data.get('existing_conditions', '').strip(),
+    }
+
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify(status='ok')
+
+
+@app.route('/assessment', methods=['POST'])
+def assessment():
+    data = request.json or {}
+    error = validate_patient_data(data)
+    if error:
+        return jsonify(error=error), 400
+
+    patient_data = build_patient_payload(data)
+    bmi = calculate_bmi(float(patient_data['height']), float(patient_data['weight']))
+    user_id = (data.get('user_id') or 'anonymous').strip() or 'anonymous'
+
+    is_emergency, matched_keywords = detect_emergency(patient_data['symptoms'])
+    if is_emergency:
+        assessment_result = build_emergency_assessment(matched_keywords)
+        session_id, chat_messages = create_session(patient_data, bmi, assessment_result, user_id)
+        return jsonify(
+            session_id=session_id,
+            emergency=True,
+            matched_keywords=matched_keywords,
+            assessment=assessment_result,
+            chat_messages=chat_messages,
+            disclaimer=DISCLAIMER,
+        )
+
+    try:
+        prompt = build_patient_context(patient_data, bmi)
+        assessment_result = generate_assessment(prompt)
+    except Exception as exc:
+        return jsonify(error=f'AI assessment failed: {exc}'), 502
+
+    session_id, chat_messages = create_session(patient_data, bmi, assessment_result, user_id)
+    return jsonify(
+        session_id=session_id,
+        emergency=False,
+        matched_keywords=[],
+        assessment=assessment_result,
+        chat_messages=chat_messages,
+        disclaimer=DISCLAIMER,
+    )
+
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    data = request.json or {}
+    session_id = data.get('session_id')
+    message = (data.get('message') or '').strip()
+
+    if not session_id:
+        return jsonify(error='session_id is required.'), 400
+    if not message:
+        return jsonify(error='message is required.'), 400
+
+    session = get_session(session_id)
+    if not session:
+        return jsonify(error='Session not found or expired. Please submit the form again.'), 404
+
+    is_emergency, matched_keywords = detect_emergency(message)
+    if is_emergency:
+        reply = (
+            'Your message suggests a possible medical emergency. '
+            'Please seek immediate in-person care or call your local emergency number. '
+            f'Indicators detected: {", ".join(matched_keywords)}.'
+        )
+        append_message(session_id, 'user', message)
+        append_message(session_id, 'assistant', reply)
+        updated = get_session(session_id)
+        return jsonify(
+            reply=reply,
+            messages=updated['messages'] if updated else session['messages'],
+            disclaimer=DISCLAIMER,
+        )
+
+    system_instruction = build_chat_context(
+        session['patient_data'],
+        session['bmi'],
+        session['assessment'],
+    )
+
+    try:
+        reply = generate_chat_reply(system_instruction, session['messages'], message)
+    except Exception as exc:
+        return jsonify(error=f'AI chat failed: {exc}'), 502
+
+    append_message(session_id, 'user', message)
+    append_message(session_id, 'assistant', reply)
+
+    return jsonify(
+        reply=reply,
+        messages=session['messages'],
+        disclaimer=DISCLAIMER,
+    )
+
+
+@app.route('/chat/stream', methods=['POST'])
+def chat_stream():
+    data = request.json or {}
+    session_id = data.get('session_id')
+    message = (data.get('message') or '').strip()
+
+    if not session_id:
+        return jsonify(error='session_id is required.'), 400
+    if not message:
+        return jsonify(error='message is required.'), 400
+
+    session = get_session(session_id)
+    if not session:
+        return jsonify(error='Session not found or expired. Please submit the form again.'), 404
+
+    system_instruction = build_chat_context(
+        session['patient_data'],
+        session['bmi'],
+        session['assessment'],
+    )
+
+    is_emergency, matched_keywords = detect_emergency(message)
+
+    def event_stream():
+        append_message(session_id, 'user', message)
+        full_reply = ''
+
+        try:
+            if is_emergency:
+                full_reply = (
+                    'Your message suggests a possible medical emergency. '
+                    'Please seek immediate in-person care or call your local emergency number. '
+                    f'Indicators detected: {", ".join(matched_keywords)}.'
+                )
+                yield f'data: {json.dumps({"delta": full_reply})}\n\n'
+            else:
+                for chunk in stream_chat_reply(system_instruction, session['messages'][:-1], message):
+                    full_reply += chunk
+                    yield f'data: {json.dumps({"delta": chunk})}\n\n'
+
+            append_message(session_id, 'assistant', full_reply)
+            updated = get_session(session_id)
+            yield f'data: {json.dumps({"done": True, "messages": updated["messages"]})}\n\n'
+        except Exception as exc:
+            session['messages'].pop()
+            yield f'data: {json.dumps({"error": f"AI chat failed: {exc}"})}\n\n'
+
+    response = Response(
+        stream_with_context(event_stream()),
+        mimetype='text/event-stream',
+    )
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'
+    return response
+
+
+@app.route('/history', methods=['GET'])
+def history_list():
+    user_id = (request.args.get('user_id') or '').strip()
+    if not user_id:
+        return jsonify(error='user_id is required.'), 400
+    return jsonify(history=list_user_history(user_id))
+
+
+@app.route('/history/<session_id>', methods=['GET'])
+def history_detail(session_id):
+    user_id = (request.args.get('user_id') or '').strip()
+    record = get_consultation(session_id)
+    if not record:
+        return jsonify(error='Consultation not found.'), 404
+    if user_id and record.get('user_id') != user_id:
+        return jsonify(error='Consultation not found.'), 404
+    return jsonify(
+        session_id=session_id,
+        created_at=record['created_at'].isoformat(),
+        patient_data=record['patient_data'],
+        bmi=record['bmi'],
+        assessment=record['assessment'],
+        messages=record['messages'],
+        active=get_session(session_id) is not None,
+        disclaimer=DISCLAIMER,
+    )
+
 
 @app.route('/generate_report', methods=['POST'])
 def generate_report():
-    data = request.json
+    """Legacy endpoint — redirects to structured assessment flow."""
+    response = assessment()
+    if isinstance(response, tuple):
+        payload, status = response
+        return payload, status
+    payload = response.get_json()
+    if payload.get('error'):
+        return jsonify(error=payload['error']), 400
+    assessment_data = payload.get('assessment', {})
+    report_lines = [
+        f"**Severity:** {assessment_data.get('severity', 'unknown')}",
+        '',
+        assessment_data.get('summary', ''),
+        '',
+        '**Possible considerations:**',
+        *[f'- {item}' for item in assessment_data.get('likely_causes', [])],
+        '',
+        '**Recommended tests:**',
+        *[f'- {item}' for item in assessment_data.get('recommended_tests', [])],
+        '',
+        assessment_data.get('advice', ''),
+        '',
+        DISCLAIMER,
+    ]
+    return jsonify(report='\n'.join(report_lines), assessment=payload.get('assessment'))
 
-    height_m = float(data['height']) / 100
-    weight_kg = float(data['weight'])
-    bmi = weight_kg / (height_m ** 2)
-
-    prompt = MEDILINK_PROMPT.format(
-        gender=data.get('gender', 'Not specified'),
-        age=data['age'],
-        height=data['height'],
-        weight=data['weight'],
-        bmi=bmi,
-        blood_pressure=data['bp'],
-        symptoms=data['symptoms']
-    )
-
-    response = get_client().models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt,
-    )
-    report = response.text
-
-    return jsonify(report=report)
 
 if __name__ == '__main__':
     port = int(os.environ.get('FLASK_PORT', 5000))

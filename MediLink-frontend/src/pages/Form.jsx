@@ -1,185 +1,264 @@
-import React, { useState } from 'react';
+import { useCallback, useState } from 'react';
 import axios from 'axios';
-import { redirect, useNavigate } from 'react-router-dom';
-import Navbar from '../components/Navbar';
-import ReactMarkdown from 'react-markdown';
+import PageLayout from '../components/PageLayout';
+import AssessmentReport from '../components/AssessmentReport';
+import ChatPanel from '../components/ChatPanel';
+import ConsultationHistory from '../components/ConsultationHistory';
+import { useAuth } from '../context/AuthContext';
 
+const INITIAL_FORM_DATA = {
+  name: '',
+  gender: '',
+  age: '',
+  height: '',
+  weight: '',
+  bp: '',
+  symptom_duration: '',
+  allergies: '',
+  current_medications: '',
+  existing_conditions: '',
+  symptoms: '',
+};
 
 const FormPage = () => {
-  const [formData, setFormData] = useState({
-    name: '',
-    gender: '',
-    age: '',
-    height: '',
-    weight: '',
-    bp: '',
-    symptoms: ''
-  });
+  const { user } = useAuth();
+  const [formData, setFormData] = useState(INITIAL_FORM_DATA);
+  const [sessionId, setSessionId] = useState('');
+  const [assessment, setAssessment] = useState(null);
+  const [emergency, setEmergency] = useState(false);
+  const [matchedKeywords, setMatchedKeywords] = useState([]);
+  const [disclaimer, setDisclaimer] = useState('');
+  const [chatMessages, setChatMessages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+  const [historyKey, setHistoryKey] = useState(0);
 
-  const [report, setReport] = useState('');
+  const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
+  const userId = user?.userId || '';
 
-  const navigate = useNavigate();
+  const resetConsultation = useCallback(() => {
+    setFormData(INITIAL_FORM_DATA);
+    setSessionId('');
+    setAssessment(null);
+    setEmergency(false);
+    setMatchedKeywords([]);
+    setDisclaimer('');
+    setChatMessages([]);
+    setError('');
+    setSubmitted(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData({
-      ...formData,
-      [name]: value
-    });
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
-    axios.post(`${apiUrl}/generate_report`, formData)
-      .then(response => {
-        setReport(response.data.report);
-      })
-      .catch(error => {
-        console.error('There was an error submitting the form!', error);
+    setLoading(true);
+    setError('');
+    setSubmitted(false);
+    setSessionId('');
+    setAssessment(null);
+    setChatMessages([]);
+
+    try {
+      const response = await axios.post(`${apiUrl}/assessment`, {
+        ...formData,
+        user_id: userId,
       });
+      setSessionId(response.data.session_id);
+      setAssessment(response.data.assessment);
+      setEmergency(response.data.emergency);
+      setMatchedKeywords(response.data.matched_keywords || []);
+      setDisclaimer(response.data.disclaimer || '');
+      setChatMessages(response.data.chat_messages || []);
+      setSubmitted(true);
+      setHistoryKey((k) => k + 1);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to generate assessment. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resumeConsultation = async (resumeSessionId) => {
+    setLoading(true);
+    setError('');
+    try {
+      const response = await axios.get(`${apiUrl}/history/${resumeSessionId}`, {
+        params: { user_id: userId },
+      });
+      const data = response.data;
+      if (!data.active) {
+        setError('This consultation has expired. Start a new one or view it in history.');
+        return;
+      }
+      setSessionId(data.session_id);
+      setFormData({
+        name: data.patient_data?.name || '',
+        gender: data.patient_data?.gender || '',
+        age: data.patient_data?.age || '',
+        height: data.patient_data?.height || '',
+        weight: data.patient_data?.weight || '',
+        bp: data.patient_data?.bp || '',
+        symptom_duration: data.patient_data?.symptom_duration || '',
+        allergies: data.patient_data?.allergies || '',
+        current_medications: data.patient_data?.current_medications || '',
+        existing_conditions: data.patient_data?.existing_conditions || '',
+        symptoms: data.patient_data?.symptoms || '',
+      });
+      setAssessment(data.assessment);
+      setEmergency(data.assessment?.severity === 'emergency');
+      setMatchedKeywords([]);
+      setDisclaimer(data.disclaimer || '');
+      setChatMessages(data.messages || []);
+      setSubmitted(true);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not resume this consultation.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <>
-      <Navbar />
-      <div className="flex flex-col items-center justify-center min-h-screen bg-blue-500 p-4">
-        <div className="bg-white rounded-lg shadow-lg p-8 max-w-lg w-full">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-blue-900 mb-2">MediLink</h1>
-            <h2 className="text-2xl font-bold text-gray-800">Patient Diagnosis</h2>
-          </div>
-          <form className="space-y-4" onSubmit={handleSubmit}>
-            <div>
-              <label className="block text-gray-700 font-semibold mb-2" htmlFor="name">
-                Name
-              </label>
-              <input
-                className="w-full p-2 border border-gray-300 rounded"
-                type="text"
-                id="name"
-                name="name"
-                value={formData.name}
-                onChange={handleChange}
-                placeholder="Enter your name"
-              />
+    <PageLayout>
+      <div className="max-w-3xl mx-auto">
+        <div className="text-center mb-8">
+          <h1 className="ml-section-title">Patient Consultation</h1>
+          <p className="ml-section-subtitle">Tell us about yourself and your symptoms to begin.</p>
+        </div>
+
+        <div className="ml-card p-6 md:p-8">
+          <ConsultationHistory
+            key={historyKey}
+            userId={userId}
+            apiUrl={apiUrl}
+            onStartNew={resetConsultation}
+            onResume={resumeConsultation}
+          />
+
+          <form className="space-y-5" onSubmit={handleSubmit}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="ml-label" htmlFor="name">Name</label>
+                <input className="ml-input" type="text" id="name" name="name" value={formData.name} onChange={handleChange} placeholder="Your name" />
+              </div>
+              <div>
+                <label className="ml-label" htmlFor="gender">Gender</label>
+                <select className="ml-input" id="gender" name="gender" value={formData.gender} onChange={handleChange} required>
+                  <option value="">Select gender</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
             </div>
-            <div>
-              <label className="block text-gray-700 font-semibold mb-2" htmlFor="gender">
-                Gender
-              </label>
-              <select
-                className="w-full p-2 border border-gray-300 rounded"
-                id="gender"
-                name="gender"
-                value={formData.gender}
-                onChange={handleChange}
-                required
-              >
-                <option value="">Select gender</option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-                <option value="Other">Other</option>
-              </select>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="ml-label" htmlFor="age">Age</label>
+                <input className="ml-input" type="number" id="age" name="age" value={formData.age} onChange={handleChange} required placeholder="Years" />
+              </div>
+              <div>
+                <label className="ml-label" htmlFor="height">Height (cm)</label>
+                <input className="ml-input" type="number" id="height" name="height" value={formData.height} onChange={handleChange} required placeholder="cm" />
+              </div>
+              <div>
+                <label className="ml-label" htmlFor="weight">Weight (kg)</label>
+                <input className="ml-input" type="number" id="weight" name="weight" value={formData.weight} onChange={handleChange} required placeholder="kg" />
+              </div>
             </div>
-            <div>
-              <label className="block text-gray-700 font-semibold mb-2" htmlFor="age">
-                Age
-              </label>
-              <input
-                className="w-full p-2 border border-gray-300 rounded"
-                type="number"
-                id="age"
-                name="age"
-                value={formData.age}
-                onChange={handleChange}
-                placeholder="Enter your age"
-              />
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="ml-label" htmlFor="bp">Blood pressure</label>
+                <input className="ml-input" type="text" id="bp" name="bp" value={formData.bp} onChange={handleChange} required placeholder="e.g. 120/80" />
+              </div>
+              <div>
+                <label className="ml-label" htmlFor="symptom_duration">Symptom duration</label>
+                <input className="ml-input" type="text" id="symptom_duration" name="symptom_duration" value={formData.symptom_duration} onChange={handleChange} placeholder="e.g. 2 days" />
+              </div>
             </div>
+
             <div>
-              <label className="block text-gray-700 font-semibold mb-2" htmlFor="height">
-                Height (cm)
-              </label>
-              <input
-                className="w-full p-2 border border-gray-300 rounded"
-                type="number"
-                id="height"
-                name="height"
-                value={formData.height}
-                onChange={handleChange}
-                placeholder="Enter your height in cm"
-              />
+              <label className="ml-label" htmlFor="allergies">Allergies</label>
+              <input className="ml-input" type="text" id="allergies" name="allergies" value={formData.allergies} onChange={handleChange} placeholder="None or list allergies" />
             </div>
+
             <div>
-              <label className="block text-gray-700 font-semibold mb-2" htmlFor="weight">
-                Weight (kg)
-              </label>
-              <input
-                className="w-full p-2 border border-gray-300 rounded"
-                type="number"
-                id="weight"
-                name="weight"
-                value={formData.weight}
-                onChange={handleChange}
-                placeholder="Enter your weight in kg"
-              />
+              <label className="ml-label" htmlFor="current_medications">Current medications</label>
+              <input className="ml-input" type="text" id="current_medications" name="current_medications" value={formData.current_medications} onChange={handleChange} placeholder="None or list medications" />
             </div>
+
             <div>
-              <label className="block text-gray-700 font-semibold mb-2" htmlFor="bp">
-                Blood Pressure
-              </label>
-              <input
-                className="w-full p-2 border border-gray-300 rounded"
-                type="text"
-                id="bp"
-                name="bp"
-                value={formData.bp}
-                onChange={handleChange}
-                placeholder="Enter your Blood Pressure (e.g., 120/80)"
-              />
+              <label className="ml-label" htmlFor="existing_conditions">Existing conditions</label>
+              <input className="ml-input" type="text" id="existing_conditions" name="existing_conditions" value={formData.existing_conditions} onChange={handleChange} placeholder="e.g. diabetes, asthma" />
             </div>
+
             <div>
-              <label className="block text-gray-700 font-semibold mb-2" htmlFor="symptoms">
-                Symptoms
-              </label>
+              <label className="ml-label" htmlFor="symptoms">Symptoms</label>
               <textarea
-                className="w-full p-2 border border-gray-300 rounded"
+                className="ml-input resize-none"
                 id="symptoms"
                 name="symptoms"
                 value={formData.symptoms}
                 onChange={handleChange}
-                placeholder="Describe your symptoms"
+                required
+                placeholder="Describe what you're experiencing..."
                 rows="4"
               />
             </div>
-            <button
-              
-              className="w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded mt-4 hover:bg-blue-700 transition duration-300"
-              type="submit"
-            >
-              Generate Report
-            </button>
-          </form>
-          {report && (
-            <div>
-            <div className="mt-8 p-4 bg-green-100 rounded">
-              <h3 className="text-xl font-bold mb-2">Diagnosis Report</h3>
-              <div className="prose max-w-none">
-                <ReactMarkdown>{report}</ReactMarkdown>
-              </div>
-              
-            </div>
-            <a
-         href='https://medilink-9j8o.onrender.com/'
-             className='w-full cursor-pointer bg-blue-600 text-white font-semibold py-2 px-4 rounded mt-4 hover:bg-blue-700 transition duration-300 text-center'>
-                Not Satisfied, talk to our AI Doctor
-              </a>
 
+            {error && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700">
+                {error}
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button className="ml-btn-primary flex-1" type="submit" disabled={loading}>
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Generating assessment...
+                  </span>
+                ) : (
+                  'Start consultation'
+                )}
+              </button>
+              {submitted && (
+                <button type="button" className="ml-btn-secondary flex-1" onClick={resetConsultation}>
+                  New consultation
+                </button>
+              )}
             </div>
+          </form>
+
+          {submitted && assessment && (
+            <>
+              <AssessmentReport
+                assessment={assessment}
+                emergency={emergency}
+                matchedKeywords={matchedKeywords}
+                disclaimer={disclaimer}
+              />
+              {sessionId && (
+                <ChatPanel
+                  key={sessionId}
+                  sessionId={sessionId}
+                  apiUrl={apiUrl}
+                  initialMessages={chatMessages}
+                />
+              )}
+            </>
           )}
         </div>
       </div>
-    </>
+    </PageLayout>
   );
 };
 
