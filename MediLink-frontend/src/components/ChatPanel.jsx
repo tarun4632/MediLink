@@ -13,7 +13,7 @@ const parseSseChunk = (block) => {
   }
 };
 
-const ChatPanel = ({ sessionId, authToken, initialMessages = [] }) => {
+const ChatPanel = ({ sessionId, authToken, initialMessages = [], embedded = false, readOnly = false }) => {
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -153,14 +153,28 @@ const ChatPanel = ({ sessionId, authToken, initialMessages = [] }) => {
     return <span className="whitespace-pre-wrap">{msg.content}</span>;
   };
 
-  return (
-    <div className="mt-10 pt-8 border-t border-slate-100">
-      <h3 className="text-xl font-bold text-slate-900 mb-1">Follow-up chat</h3>
-      <p className="text-sm text-slate-500 mb-4">
-        Ask questions about your symptoms or the assessment above.
-      </p>
+  const messageAreaClass = embedded
+    ? 'min-h-[200px] max-h-[calc(100vh-22rem)] overflow-y-auto'
+    : 'h-72 overflow-y-auto';
 
-      <div className="h-72 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/80 p-4 space-y-3 mb-4">
+  return (
+    <div className={embedded ? 'flex flex-col h-full' : 'mt-10 pt-8 border-t border-slate-100'}>
+      {!embedded && (
+        <>
+          <h3 className="text-xl font-bold text-slate-900 mb-1">Follow-up chat</h3>
+          <p className="text-sm text-slate-500 mb-4">
+            Ask questions about your symptoms or the assessment above.
+          </p>
+        </>
+      )}
+
+      {embedded && readOnly && (
+        <p className="text-xs text-slate-500 mb-3 p-2 rounded-lg bg-slate-50 border border-slate-100">
+          This consultation has ended. Chat history is read-only.
+        </p>
+      )}
+
+      <div className={`${messageAreaClass} rounded-2xl border border-slate-200 bg-slate-50/80 p-4 space-y-3 mb-4`}>
         {messages.map((msg, index) => (
           <div
             key={`${msg.role}-${index}`}
@@ -186,23 +200,25 @@ const ChatPanel = ({ sessionId, authToken, initialMessages = [] }) => {
         </div>
       )}
 
-      <form onSubmit={sendMessage} className="flex gap-2">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Type your question..."
-          className="ml-input flex-1"
-          disabled={loading}
-        />
-        <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          className="ml-btn-primary px-6"
-        >
-          Send
-        </button>
-      </form>
+      {!readOnly && (
+        <form onSubmit={sendMessage} className="flex gap-2 shrink-0">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Type your question..."
+            className="ml-input flex-1 text-sm py-2"
+            disabled={loading}
+          />
+          <button
+            type="submit"
+            disabled={loading || !input.trim()}
+            className="ml-btn-primary px-4 text-sm"
+          >
+            Send
+          </button>
+        </form>
+      )}
     </div>
   );
 };

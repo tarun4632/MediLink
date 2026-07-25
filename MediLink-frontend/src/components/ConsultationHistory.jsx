@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react';
 import api, { getApiUrl } from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import AssessmentReport from './AssessmentReport';
 
-const ConsultationHistory = ({ onStartNew, onResume }) => {
+const ConsultationHistory = ({ onStartNew, onResume, onView, refreshKey, activeSessionId }) => {
   const { user } = useAuth();
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [selected, setSelected] = useState(null);
-  const [viewLoading, setViewLoading] = useState(false);
 
   const loadHistory = async () => {
+    if (!user?.token) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError('');
     try {
@@ -22,9 +23,7 @@ const ConsultationHistory = ({ onStartNew, onResume }) => {
       if (apiMessage) {
         setError(apiMessage);
       } else if (!err.response) {
-        setError(
-          `Cannot reach the API at ${getApiUrl()}. Set VITE_API_URL in Vercel to your Render URL and redeploy.`,
-        );
+        setError(`Cannot reach the API at ${getApiUrl()}.`);
       } else {
         setError('Could not load consultation history.');
       }
@@ -34,138 +33,103 @@ const ConsultationHistory = ({ onStartNew, onResume }) => {
   };
 
   useEffect(() => {
-    if (!user?.token) {
-      setLoading(false);
-      return;
-    }
     loadHistory();
-  }, [user?.token]);
-
-  const viewConsultation = async (sessionId) => {
-    setViewLoading(true);
-    setError('');
-    try {
-      const response = await api.get(`/history/${sessionId}`);
-      setSelected(response.data);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Could not load this consultation.');
-    } finally {
-      setViewLoading(false);
-    }
-  };
+  }, [user?.token, refreshKey]);
 
   const formatDate = (iso) => {
     if (!iso) return '';
-    return new Date(iso).toLocaleString();
+    return new Date(iso).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const severityColor = (severity) => {
+    const map = {
+      mild: 'bg-emerald-50 text-emerald-700',
+      moderate: 'bg-amber-50 text-amber-700',
+      severe: 'bg-orange-50 text-orange-700',
+      emergency: 'bg-red-50 text-red-700',
+    };
+    return map[severity] || 'bg-slate-100 text-slate-600';
   };
 
   return (
-    <div className="mb-8">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900">Your consultations</h2>
-          <p className="text-sm text-slate-500">Saved consultations linked to your account.</p>
+    <div className="ml-card flex flex-col max-h-[calc(100vh-6rem)] lg:max-h-[calc(100vh-7rem)] overflow-hidden">
+      <div className="shrink-0 p-4 border-b border-slate-100">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900">History</h2>
+            <p className="text-xs text-slate-500">Past consultations</p>
+          </div>
+          <button type="button" onClick={onStartNew} className="ml-btn-primary text-xs py-1.5 px-3">
+            New
+          </button>
         </div>
-        <button type="button" onClick={onStartNew} className="ml-btn-primary text-sm py-2 px-4">
-          New consultation
-        </button>
       </div>
 
-      {loading && <p className="text-sm text-slate-500">Loading history...</p>}
-      {error && (
-        <div className="mb-3 p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+      <div className="flex-1 overflow-y-auto p-3">
+        {loading && <p className="text-xs text-slate-500 p-2">Loading...</p>}
 
-      {!loading && history.length === 0 && (
-        <p className="text-sm text-slate-500 p-4 rounded-xl bg-slate-50 border border-slate-100">
-          No past consultations yet. Start your first one below.
-        </p>
-      )}
+        {error && (
+          <div className="mb-2 p-2 rounded-lg bg-red-50 border border-red-100 text-xs text-red-700">
+            {error}
+          </div>
+        )}
 
-      {history.length > 0 && (
-        <div className="space-y-2 mb-4">
-          {history.map((item) => (
-            <div
-              key={item.session_id}
-              className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl border border-slate-200 bg-white"
-            >
-              <div className="min-w-0">
-                <p className="font-medium text-slate-900 truncate">
-                  {item.patient_name || 'Consultation'}
-                  <span className="ml-2 text-xs font-semibold uppercase text-medilink-600">
+        {!loading && history.length === 0 && (
+          <p className="text-xs text-slate-500 p-3 rounded-xl bg-slate-50 border border-slate-100 text-center">
+            No past consultations yet.
+          </p>
+        )}
+
+        <div className="space-y-2">
+          {history.map((item) => {
+            const isActive = item.session_id === activeSessionId;
+            return (
+              <div
+                key={item.session_id}
+                className={`p-3 rounded-xl border transition ${
+                  isActive
+                    ? 'border-medilink-300 bg-medilink-50/50 ring-1 ring-medilink-200'
+                    : 'border-slate-200 bg-white hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2 mb-1">
+                  <p className="text-sm font-medium text-slate-900 truncate">
+                    {item.patient_name || 'Consultation'}
+                  </p>
+                  <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${severityColor(item.severity)}`}>
                     {item.severity}
                   </span>
-                </p>
-                <p className="text-xs text-slate-500">{formatDate(item.created_at)}</p>
-                <p className="text-sm text-slate-600 truncate">{item.symptoms_preview}</p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  className="ml-btn-secondary text-xs py-1.5 px-3"
-                  onClick={() => viewConsultation(item.session_id)}
-                >
-                  View
-                </button>
-                {item.active && (
+                </div>
+                <p className="text-[11px] text-slate-400 mb-1">{formatDate(item.created_at)}</p>
+                <p className="text-xs text-slate-600 line-clamp-2 mb-2">{item.symptoms_preview}</p>
+                <div className="flex gap-1.5">
                   <button
                     type="button"
-                    className="ml-btn-primary text-xs py-1.5 px-3"
-                    onClick={() => onResume(item.session_id)}
+                    className="flex-1 text-xs py-1 px-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                    onClick={() => onView(item.session_id)}
                   >
-                    Resume chat
+                    View
                   </button>
-                )}
+                  {item.active && (
+                    <button
+                      type="button"
+                      className="flex-1 text-xs py-1 px-2 rounded-lg bg-medilink-600 text-white hover:bg-medilink-700"
+                      onClick={() => onResume(item.session_id)}
+                    >
+                      Resume
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
-      )}
-
-      {viewLoading && <p className="text-sm text-slate-500">Loading consultation...</p>}
-
-      {selected && !viewLoading && (
-        <div className="p-4 rounded-2xl border border-medilink-100 bg-medilink-50/50">
-          <div className="flex justify-between items-start gap-2 mb-4">
-            <div>
-              <h3 className="font-semibold text-slate-900">Past consultation</h3>
-              <p className="text-xs text-slate-500">{formatDate(selected.created_at)}</p>
-            </div>
-            <button
-              type="button"
-              className="text-sm text-slate-500 hover:text-slate-700"
-              onClick={() => setSelected(null)}
-            >
-              Close
-            </button>
-          </div>
-          <AssessmentReport
-            assessment={selected.assessment}
-            emergency={selected.assessment?.severity === 'emergency'}
-            matchedKeywords={[]}
-            disclaimer={selected.disclaimer}
-          />
-          {selected.messages?.length > 0 && (
-            <div className="mt-4 pt-4 border-t border-medilink-100">
-              <h4 className="text-sm font-semibold text-slate-800 mb-2">Chat history</h4>
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                {selected.messages.map((msg, index) => (
-                  <div
-                    key={`${msg.role}-${index}`}
-                    className={`text-sm p-2 rounded-lg ${
-                      msg.role === 'user' ? 'bg-medilink-100 ml-8' : 'bg-white border mr-8'
-                    }`}
-                  >
-                    {msg.content}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      </div>
     </div>
   );
 };

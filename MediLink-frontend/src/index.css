@@ -56,4 +56,10 @@
   .ml-section-subtitle {
     @apply text-slate-500 mt-1;
   }
+
+  .ml-sidebar-scroll {
+    @apply overflow-y-auto;
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.slate.300') transparent;
+  }
 }

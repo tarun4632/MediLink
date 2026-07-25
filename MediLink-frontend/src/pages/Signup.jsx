@@ -46,7 +46,7 @@ const Signup = () => {
           <p className="text-sm font-medium text-medilink-600 mb-2">Get started</p>
           <h1 className="text-3xl font-bold text-slate-900 mb-2">Create account</h1>
           <p className="text-slate-500 mb-8">
-            Register to save consultations and access your medical history.
+            Register to use MediLink and upload medical reports for AI-assisted assessment.
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">

@@ -41,7 +41,7 @@ const Login = () => {
             <p className="text-sm font-medium text-medilink-600 mb-2">Welcome back</p>
             <h1 className="text-3xl font-bold text-slate-900 mb-2">Sign in to MediLink</h1>
             <p className="text-slate-500 mb-6">
-              Sign in to access your consultations and medical history.
+              Sign in to start a consultation and upload medical reports.
             </p>
 
             <div className="mb-6 p-3 rounded-xl bg-medilink-50 border border-medilink-100 text-sm text-slate-600">
