@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import api, { getApiUrl } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import AssessmentReport from './AssessmentReport';
 
 const ConsultationHistory = ({ onStartNew, onResume }) => {
+  const { user } = useAuth();
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -32,8 +34,12 @@ const ConsultationHistory = ({ onStartNew, onResume }) => {
   };
 
   useEffect(() => {
+    if (!user?.token) {
+      setLoading(false);
+      return;
+    }
     loadHistory();
-  }, []);
+  }, [user?.token]);
 
   const viewConsultation = async (sessionId) => {
     setViewLoading(true);

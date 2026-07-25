@@ -15,7 +15,13 @@ const readStoredUser = () => {
 };
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(() => readStoredUser());
+  const [user, setUser] = useState(() => {
+    const stored = readStoredUser();
+    if (stored?.token) {
+      setAuthToken(stored.token);
+    }
+    return stored;
+  });
 
   useEffect(() => {
     setAuthToken(user?.token || null);
@@ -28,18 +34,22 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (username, password) => {
     const response = await api.post('/auth/login', { username, password });
-    setUser({
+    const nextUser = {
       userId: response.data.username,
       token: response.data.token,
-    });
+    };
+    setAuthToken(nextUser.token);
+    setUser(nextUser);
   };
 
   const signup = async (username, password) => {
     const response = await api.post('/auth/signup', { username, password });
-    setUser({
+    const nextUser = {
       userId: response.data.username,
       token: response.data.token,
-    });
+    };
+    setAuthToken(nextUser.token);
+    setUser(nextUser);
   };
 
   const logout = async () => {
