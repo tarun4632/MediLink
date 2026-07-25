@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import axios from 'axios';
+import api from '../api/client';
 import PageLayout from '../components/PageLayout';
 import AssessmentReport from '../components/AssessmentReport';
 import ChatPanel from '../components/ChatPanel';
@@ -34,9 +34,6 @@ const FormPage = () => {
   const [submitted, setSubmitted] = useState(false);
   const [historyKey, setHistoryKey] = useState(0);
 
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
-  const userId = user?.userId || '';
-
   const resetConsultation = useCallback(() => {
     setFormData(INITIAL_FORM_DATA);
     setSessionId('');
@@ -65,10 +62,7 @@ const FormPage = () => {
     setChatMessages([]);
 
     try {
-      const response = await axios.post(`${apiUrl}/assessment`, {
-        ...formData,
-        user_id: userId,
-      });
+      const response = await api.post('/assessment', formData);
       setSessionId(response.data.session_id);
       setAssessment(response.data.assessment);
       setEmergency(response.data.emergency);
@@ -88,9 +82,7 @@ const FormPage = () => {
     setLoading(true);
     setError('');
     try {
-      const response = await axios.get(`${apiUrl}/history/${resumeSessionId}`, {
-        params: { user_id: userId },
-      });
+      const response = await api.get(`/history/${resumeSessionId}`);
       const data = response.data;
       if (!data.active) {
         setError('This consultation has expired. Start a new one or view it in history.');
@@ -135,8 +127,6 @@ const FormPage = () => {
         <div className="ml-card p-6 md:p-8">
           <ConsultationHistory
             key={historyKey}
-            userId={userId}
-            apiUrl={apiUrl}
             onStartNew={resetConsultation}
             onResume={resumeConsultation}
           />
@@ -250,7 +240,7 @@ const FormPage = () => {
                 <ChatPanel
                   key={sessionId}
                   sessionId={sessionId}
-                  apiUrl={apiUrl}
+                  authToken={user?.token}
                   initialMessages={chatMessages}
                 />
               )}

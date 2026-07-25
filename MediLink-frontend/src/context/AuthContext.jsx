@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import api, { setAuthToken } from '../api/client';
 
 const STORAGE_KEY = 'medilink_auth';
 
@@ -17,6 +18,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(() => readStoredUser());
 
   useEffect(() => {
+    setAuthToken(user?.token || null);
     if (user) {
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(user));
     } else {
@@ -24,21 +26,40 @@ export const AuthProvider = ({ children }) => {
     }
   }, [user]);
 
-  const login = (userId) => {
-    const trimmedId = userId.trim();
-    if (!trimmedId) {
-      throw new Error('User ID is required.');
-    }
-    setUser({ userId: trimmedId });
+  const login = async (username, password) => {
+    const response = await api.post('/auth/login', { username, password });
+    setUser({
+      userId: response.data.username,
+      token: response.data.token,
+    });
   };
 
-  const logout = () => setUser(null);
+  const signup = async (username, password) => {
+    const response = await api.post('/auth/signup', { username, password });
+    setUser({
+      userId: response.data.username,
+      token: response.data.token,
+    });
+  };
+
+  const logout = async () => {
+    try {
+      if (user?.token) {
+        await api.post('/auth/logout');
+      }
+    } catch {
+      // Clear local session even if the server call fails.
+    } finally {
+      setUser(null);
+    }
+  };
 
   const value = useMemo(
     () => ({
       user,
-      isAuthenticated: Boolean(user?.userId),
+      isAuthenticated: Boolean(user?.token),
       login,
+      signup,
       logout,
     }),
     [user],

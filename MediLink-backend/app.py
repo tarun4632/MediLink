@@ -3,9 +3,17 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, request, stream_with_context
+from flask import Flask, Response, g, jsonify, request, stream_with_context
 from flask_cors import CORS
 
+from auth import require_auth
+from database import (
+    authenticate_user,
+    create_session as create_auth_session,
+    create_user,
+    init_db,
+    revoke_session,
+)
 from gemini_client import generate_assessment, generate_chat_reply, stream_chat_reply
 from prompts import DISCLAIMER, build_chat_context, build_patient_context
 from sessions import append_message, create_session, get_consultation, get_session, list_user_history
@@ -15,6 +23,7 @@ load_dotenv(Path(__file__).resolve().parent / '.env')
 
 app = Flask(__name__)
 CORS(app)
+init_db()
 
 REQUIRED_FIELDS = ['gender', 'age', 'height', 'weight', 'bp', 'symptoms']
 
@@ -57,12 +66,54 @@ def build_patient_payload(data: dict) -> dict:
     }
 
 
+def _session_belongs_to_user(record: dict | None, username: str) -> bool:
+    return bool(record and record.get('user_id') == username)
+
+
+@app.route('/auth/signup', methods=['POST'])
+def signup():
+    data = request.json or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+    try:
+        user = create_user(username, password)
+        token = create_auth_session(user['id'])
+        return jsonify(token=token, username=user['username']), 201
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+
+
+@app.route('/auth/login', methods=['POST'])
+def login():
+    data = request.json or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+    if not username or not password:
+        return jsonify(error='Username and password are required.'), 400
+
+    user = authenticate_user(username, password)
+    if not user:
+        return jsonify(error='Invalid username or password.'), 401
+
+    token = create_auth_session(user['id'])
+    return jsonify(token=token, username=user['username'])
+
+
+@app.route('/auth/logout', methods=['POST'])
+@require_auth
+def logout():
+    token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+    revoke_session(token)
+    return jsonify(message='Logged out.')
+
+
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify(status='ok')
 
 
 @app.route('/assessment', methods=['POST'])
+@require_auth
 def assessment():
     data = request.json or {}
     error = validate_patient_data(data)
@@ -71,7 +122,7 @@ def assessment():
 
     patient_data = build_patient_payload(data)
     bmi = calculate_bmi(float(patient_data['height']), float(patient_data['weight']))
-    user_id = (data.get('user_id') or 'anonymous').strip() or 'anonymous'
+    user_id = g.current_user['username']
 
     is_emergency, matched_keywords = detect_emergency(patient_data['symptoms'])
     if is_emergency:
@@ -104,6 +155,7 @@ def assessment():
 
 
 @app.route('/chat', methods=['POST'])
+@require_auth
 def chat():
     data = request.json or {}
     session_id = data.get('session_id')
@@ -117,6 +169,8 @@ def chat():
     session = get_session(session_id)
     if not session:
         return jsonify(error='Session not found or expired. Please submit the form again.'), 404
+    if not _session_belongs_to_user(session, g.current_user['username']):
+        return jsonify(error='Session not found.'), 404
 
     is_emergency, matched_keywords = detect_emergency(message)
     if is_emergency:
@@ -156,6 +210,7 @@ def chat():
 
 
 @app.route('/chat/stream', methods=['POST'])
+@require_auth
 def chat_stream():
     data = request.json or {}
     session_id = data.get('session_id')
@@ -169,6 +224,8 @@ def chat_stream():
     session = get_session(session_id)
     if not session:
         return jsonify(error='Session not found or expired. Please submit the form again.'), 404
+    if not _session_belongs_to_user(session, g.current_user['username']):
+        return jsonify(error='Session not found.'), 404
 
     system_instruction = build_chat_context(
         session['patient_data'],
@@ -212,20 +269,16 @@ def chat_stream():
 
 
 @app.route('/history', methods=['GET'])
+@require_auth
 def history_list():
-    user_id = (request.args.get('user_id') or '').strip()
-    if not user_id:
-        return jsonify(error='user_id is required.'), 400
-    return jsonify(history=list_user_history(user_id))
+    return jsonify(history=list_user_history(g.current_user['username']))
 
 
 @app.route('/history/<session_id>', methods=['GET'])
+@require_auth
 def history_detail(session_id):
-    user_id = (request.args.get('user_id') or '').strip()
     record = get_consultation(session_id)
-    if not record:
-        return jsonify(error='Consultation not found.'), 404
-    if user_id and record.get('user_id') != user_id:
+    if not record or not _session_belongs_to_user(record, g.current_user['username']):
         return jsonify(error='Consultation not found.'), 404
     return jsonify(
         session_id=session_id,
@@ -240,6 +293,7 @@ def history_detail(session_id):
 
 
 @app.route('/generate_report', methods=['POST'])
+@require_auth
 def generate_report():
     """Legacy endpoint — redirects to structured assessment flow."""
     response = assessment()

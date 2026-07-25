@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import axios from 'axios';
+import api, { getApiUrl } from '../api/client';
 import AssessmentReport from './AssessmentReport';
 
-const ConsultationHistory = ({ userId, apiUrl, onStartNew, onResume }) => {
+const ConsultationHistory = ({ onStartNew, onResume }) => {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -10,14 +10,22 @@ const ConsultationHistory = ({ userId, apiUrl, onStartNew, onResume }) => {
   const [viewLoading, setViewLoading] = useState(false);
 
   const loadHistory = async () => {
-    if (!userId) return;
     setLoading(true);
     setError('');
     try {
-      const response = await axios.get(`${apiUrl}/history`, { params: { user_id: userId } });
+      const response = await api.get('/history');
       setHistory(response.data.history || []);
     } catch (err) {
-      setError(err.response?.data?.error || 'Could not load consultation history.');
+      const apiMessage = err.response?.data?.error;
+      if (apiMessage) {
+        setError(apiMessage);
+      } else if (!err.response) {
+        setError(
+          `Cannot reach the API at ${getApiUrl()}. Set VITE_API_URL in Vercel to your Render URL and redeploy.`,
+        );
+      } else {
+        setError('Could not load consultation history.');
+      }
     } finally {
       setLoading(false);
     }
@@ -25,15 +33,13 @@ const ConsultationHistory = ({ userId, apiUrl, onStartNew, onResume }) => {
 
   useEffect(() => {
     loadHistory();
-  }, [userId, apiUrl]);
+  }, []);
 
   const viewConsultation = async (sessionId) => {
     setViewLoading(true);
     setError('');
     try {
-      const response = await axios.get(`${apiUrl}/history/${sessionId}`, {
-        params: { user_id: userId },
-      });
+      const response = await api.get(`/history/${sessionId}`);
       setSelected(response.data);
     } catch (err) {
       setError(err.response?.data?.error || 'Could not load this consultation.');
@@ -52,7 +58,7 @@ const ConsultationHistory = ({ userId, apiUrl, onStartNew, onResume }) => {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
           <h2 className="text-lg font-bold text-slate-900">Your consultations</h2>
-          <p className="text-sm text-slate-500">Saved locally in ChromaDB — persists across restarts.</p>
+          <p className="text-sm text-slate-500">Saved consultations linked to your account.</p>
         </div>
         <button type="button" onClick={onStartNew} className="ml-btn-primary text-sm py-2 px-4">
           New consultation

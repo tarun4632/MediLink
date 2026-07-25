@@ -163,3 +163,4 @@ cython_debug/
 
 /MediLink-frontend/node_modules
 MediLink-backend/chroma_data/
+MediLink-backend/medilink.db

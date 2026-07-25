@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 
+import { getApiUrl } from '../api/client';
+
 const parseSseChunk = (block) => {
   const line = block.trim();
   if (!line.startsWith('data: ')) return null;
@@ -11,7 +13,7 @@ const parseSseChunk = (block) => {
   }
 };
 
-const ChatPanel = ({ sessionId, apiUrl, initialMessages = [] }) => {
+const ChatPanel = ({ sessionId, authToken, initialMessages = [] }) => {
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -38,9 +40,12 @@ const ChatPanel = ({ sessionId, apiUrl, initialMessages = [] }) => {
     setError('');
 
     try {
-      const response = await fetch(`${apiUrl}/chat/stream`, {
+      const response = await fetch(`${getApiUrl()}/chat/stream`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
         body: JSON.stringify({ session_id: sessionId, message: trimmed }),
       });
 

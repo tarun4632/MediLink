@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 import { useAuth } from '../context/AuthContext';
 
 const Login = () => {
-  const [userData, setUserData] = useState({ userId: '', password: '' });
+  const [userData, setUserData] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -19,15 +19,15 @@ const Login = () => {
     setUserData((prev) => ({ ...prev, [id]: value }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      login(userData.userId);
+      await login(userData.username, userData.password);
       navigate('/form');
     } catch (err) {
-      setError(err.message || 'Login failed. Please try again.');
+      setError(err.response?.data?.error || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -40,19 +40,25 @@ const Login = () => {
           <div className="p-8 md:p-10 flex flex-col justify-center">
             <p className="text-sm font-medium text-medilink-600 mb-2">Welcome back</p>
             <h1 className="text-3xl font-bold text-slate-900 mb-2">Sign in to MediLink</h1>
-            <p className="text-slate-500 mb-8">
-              Enter your kiosk ID to access the patient consultation.
+            <p className="text-slate-500 mb-6">
+              Sign in to access your consultations and medical history.
             </p>
+
+            <div className="mb-6 p-3 rounded-xl bg-medilink-50 border border-medilink-100 text-sm text-slate-600">
+              <p className="font-medium text-slate-800 mb-1">Test account</p>
+              <p>Username: <span className="font-mono">demo</span></p>
+              <p>Password: <span className="font-mono">MediLink@123</span></p>
+            </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="ml-label" htmlFor="userId">User ID</label>
+                <label className="ml-label" htmlFor="username">Username</label>
                 <input
                   type="text"
-                  id="userId"
+                  id="username"
                   className="ml-input"
-                  placeholder="Enter your user ID"
-                  value={userData.userId}
+                  placeholder="Enter your username"
+                  value={userData.username}
                   onChange={handleChange}
                   required
                 />
@@ -63,9 +69,10 @@ const Login = () => {
                   type="password"
                   id="password"
                   className="ml-input"
-                  placeholder="Enter your password (optional for demo)"
+                  placeholder="Enter your password"
                   value={userData.password}
                   onChange={handleChange}
+                  required
                 />
               </div>
               {error && (
@@ -74,9 +81,16 @@ const Login = () => {
                 </div>
               )}
               <button type="submit" className="ml-btn-primary w-full mt-2" disabled={loading}>
-                {loading ? 'Signing in...' : 'Continue to consultation'}
+                {loading ? 'Signing in...' : 'Sign in'}
               </button>
             </form>
+
+            <p className="mt-6 text-sm text-slate-500 text-center">
+              New here?{' '}
+              <Link to="/signup" className="font-medium text-medilink-600 hover:text-medilink-700">
+                Create an account
+              </Link>
+            </p>
           </div>
 
           <div className="hidden md:flex bg-gradient-to-br from-medilink-600 to-medilink-800 p-10 items-center justify-center relative overflow-hidden">
